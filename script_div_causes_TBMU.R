@@ -1,8 +1,17 @@
-########################################
-### Analyses causes of divorce TBMU ###
-#######################################
+########################################################
+### Analyses causes and consequences of divorce TBMU ###
+########################################################
 
-setwd("D:/Thomas/Google Drive/postdoc/FQRNT murre project/murre data")
+
+
+
+######
+## 1. Causese of divorce
+
+
+
+
+
 
 murre_RS = read.table("RS murre data total.csv", sep = ",", header = TRUE)
 

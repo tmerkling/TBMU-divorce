@@ -1,0 +1,234 @@
+---
+title: "Divorce_TBMU"
+author: "Thomas Merkling"
+date: "11 July 2018"
+output: html_document
+---
+
+```{r, warning = FALSE, message = FALSE, include = FALSE}
+setwd("D:/Thomas/Google Drive/postdoc/FQRNT murre project/murre data/TBMU-divorce")
+```
+
+```{r}
+library(dplyr)
+library(glmmTMB)
+library(MuMIn)
+library(corrplot)
+library(arm)
+library(ggplot2)
+```
+
+
+# **1. Causes of divorce**
+
+import data created with the master data
+```{r}
+TBMU_divorce = read.table("TBMU_Coats_divorce_data.csv", header = TRUE, sep = ",")
+dim(TBMU_divorce) # 1460   18
+```
+
+for these analyses we are only interested in whether a pair remained together or divorced, so we'll discard all the mate switching due to an individual disappareance.
+```{r}
+TBMU_divorce = TBMU_divorce %>% filter(Outcome != "DEAD")
+dim(TBMU_divorce) # 812  18
+TBMU_divorce = TBMU_divorce %>% mutate(ProbDiv = if_else(Outcome == "DIV",1,0))
+```
+
+data exploration: how many missing data for each 
+```{r }
+table(is.na(TBMU_divorce$Laying))
+table(is.na(TBMU_divorce$Fledge))
+table(is.na(TBMU_divorce$AgeMale))
+table(is.na(TBMU_divorce$AgeFemale))
+table(is.na(TBMU_divorce$AgeBird1))
+table(is.na(TBMU_divorce$AgeBird2))
+table(is.na(TBMU_divorce$ExpMale))
+table(is.na(TBMU_divorce$ExpFemale))
+table(is.na(TBMU_divorce$ExpBird1))
+table(is.na(TBMU_divorce$ExpBird2))
+table(is.na(TBMU_divorce$PairBond))
+table(is.na(TBMU_divorce$QLTY))
+```
+it's mostly for age and breeding experience that there are missing values and for fledging a bit too
+
+```{r}
+TBMU_divorce_clean = TBMU_divorce %>% dplyr::select(c(-Hatching,-Outcome)) %>% na.omit() %>% mutate(Plot = substr(TBMU_divorce_clean$Site,1,1))
+TBMU_divorce_clean$BandNo1 = factor(TBMU_divorce_clean$BandNo1)
+TBMU_divorce_clean$BandNo2 = factor(TBMU_divorce_clean$BandNo2)
+TBMU_divorce_clean$Site = factor(TBMU_divorce_clean$Site)
+```
+removing all the observations with at least one NA leaves 568 observations!
+(if I include observations of unknown sex individuals, it increases sample size by 90)
+
+Is there variability among years and/or among plots in divorce rates?
+```{r}
+div_Year = TBMU_divorce_clean %>% group_by(Year) %>% summarise(PropDiv = mean(ProbDiv), N_Year = n())
+```
+
+
+collinearity among explanatory variables
+```{r}
+cor_div = cor(TBMU_divorce_clean[,c(5,7:8,11:12,15:16)])
+corrplot.mixed(cor_div, upper = "ellipse", lower = "number")
+```
+Logically age and experience are strongly correlated within a sex, but otherwise no very strong correlations. So age and experience will never be in the same model.
+We also know that reproductive success varies with age in this species, so is there some collinearity with Fledge?
+
+```{r}
+source(file = "HighstatLib.R") 
+```
+this is an R code containing functions created by Zuur et al.
+
+```{r}
+corvif(TBMU_divorce_clean[,c(5:8,15:16)])
+```
+VIFs suggest that there is no multicollinearity between ages, laying date, fledging probability, pair-bond and site quality
+
+sample size is quite small for the extreme values of ages, breeding experience and pair-bond, so I'll group them together.
+to facilitate model convergence and allow a better comparison of effects across models, all the variables are standardised
+I'm also creating variables to look at quadratic effects
+```{r}
+TBMU_divorce_clean = TBMU_divorce_clean %>% mutate_if(is.integer, as.numeric) %>% 
+                            mutate(stdAgeMale = if_else(AgeMale >=20,20,AgeMale), stdAgeFemale = if_else(AgeFemale >= 20, 20, AgeFemale), stdExpMale = if_else(ExpMale >= 15, 15, ExpMale), stdExpFemale = if_else(ExpFemale >= 15, 15, ExpFemale), stdPairBond = if_else(PairBond >= 10, 10, PairBond)) %>%
+                         mutate(stdAgeMale = arm::rescale(stdAgeMale), stdAgeFemale = rescale(stdAgeFemale), stdExpMale = rescale(stdExpMale), stdExpFemale = rescale(stdExpFemale), stdPairBond = rescale(stdPairBond), stdQlty = rescale(QLTY), stdFledge = rescale(Fledge), stdLaying = rescale(Laying),stdYear = rescale(Year)) %>% mutate(stdAgeMaleSq = I(stdAgeMale^2), stdAgeFemaleSq = I(stdAgeFemale^2), stdExpMaleSq = I(stdExpMale^2), stdExpFemaleSq = I(stdExpFemale^2), stdPairBondSq = I(stdPairBond^2), stdQltySq = I(stdQlty^2), stdLayingSq = I(stdLaying^2))
+```
+
+
+I won't consider interactions with more than 2 terms and not models with age and breeding experience together
+```{r}
+mod_div = list()
+
+## 2-way interactions with fledging probability
+mod_div[[1]] = glmmTMB(ProbDiv ~ stdFledge * stdAgeMale + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data = TBMU_divorce_clean)
+mod_div[[2]] = glmmTMB(ProbDiv ~ stdFledge * stdAgeFemale + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[3]] = glmmTMB(ProbDiv ~ stdFledge * stdExpMale + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[4]] = glmmTMB(ProbDiv ~ stdFledge * stdExpFemale + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[5]] = glmmTMB(ProbDiv ~ stdFledge * stdPairBond + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[6]] = glmmTMB(ProbDiv ~ stdFledge * stdQlty + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[7]] = glmmTMB(ProbDiv ~ stdFledge * stdLaying + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+
+## 2-way interactions with male age
+mod_div[[8]] = glmmTMB(ProbDiv ~ stdAgeMale * stdAgeFemale + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[9]] = glmmTMB(ProbDiv ~ stdAgeMale * stdPairBond + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[10]] = glmmTMB(ProbDiv ~ stdAgeMale * stdQlty + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[11]] = glmmTMB(ProbDiv ~ stdAgeMale * stdLaying + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+
+## 2-way interactions with female age
+#mod_div[[12]] = glmmTMB(ProbDiv ~ stdAgeFemale * stdPairBond + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean) # this model didn't converge properly, probably because the data were unbalanced
+mod_div[[12]] = glmmTMB(ProbDiv ~ stdAgeFemale * stdQlty + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[13]] = glmmTMB(ProbDiv ~ stdAgeFemale * stdLaying + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+
+## 2-way interaction with male breeding experience
+mod_div[[14]] = glmmTMB(ProbDiv ~ stdExpMale * stdExpFemale + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[15]] = glmmTMB(ProbDiv ~ stdExpMale * stdPairBond + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[16]] = glmmTMB(ProbDiv ~ stdExpMale * stdQlty + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[17]] = glmmTMB(ProbDiv ~ stdExpMale * stdLaying + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+
+## 2-way interactions with female breeding experience
+mod_div[[18]] = glmmTMB(ProbDiv ~ stdExpFemale * stdPairBond + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[19]] = glmmTMB(ProbDiv ~ stdExpFemale * stdQlty + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[20]] = glmmTMB(ProbDiv ~ stdExpFemale * stdLaying + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+
+## 2-way interactions with pair-bond duration
+mod_div[[21]] = glmmTMB(ProbDiv ~ stdPairBond * stdQlty + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[22]] = glmmTMB(ProbDiv ~ stdPairBond * stdLaying + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+
+## 2-way interactions with site quality
+mod_div[[23]] = glmmTMB(ProbDiv ~ stdQlty * stdLaying + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+
+## additive models with fledging probability
+mod_div[[24]] = glmmTMB(ProbDiv ~ stdFledge + stdAgeMale + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[25]] = glmmTMB(ProbDiv ~ stdFledge + stdAgeFemale + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[26]] = glmmTMB(ProbDiv ~ stdFledge + stdExpMale + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[27]] = glmmTMB(ProbDiv ~ stdFledge + stdExpFemale + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[28]] = glmmTMB(ProbDiv ~ stdFledge + stdPairBond + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[29]] = glmmTMB(ProbDiv ~ stdFledge + stdQlty + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[30]] = glmmTMB(ProbDiv ~ stdFledge + stdLaying + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+
+##\ additive models with male age
+mod_div[[31]] = glmmTMB(ProbDiv ~ stdAgeMale + stdAgeFemale + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[32]] = glmmTMB(ProbDiv ~ stdAgeMale + stdPairBond + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[33]] = glmmTMB(ProbDiv ~ stdAgeMale + stdQlty + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[34]] = glmmTMB(ProbDiv ~ stdAgeMale + stdLaying + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+
+## additive models with female age
+mod_div[[35]] = glmmTMB(ProbDiv ~ stdAgeFemale + stdPairBond + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[36]] = glmmTMB(ProbDiv ~ stdAgeFemale + stdQlty + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[37]] = glmmTMB(ProbDiv ~ stdAgeFemale + stdLaying + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+
+## additive models with male breeding experience
+mod_div[[38]] = glmmTMB(ProbDiv ~ stdExpMale + stdExpFemale + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[39]] = glmmTMB(ProbDiv ~ stdExpMale + stdPairBond + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[40]] = glmmTMB(ProbDiv ~ stdExpMale + stdQlty + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[41]] = glmmTMB(ProbDiv ~ stdExpMale + stdLaying + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+
+## additive models with female breeding experience
+mod_div[[42]] = glmmTMB(ProbDiv ~ stdExpFemale + stdPairBond + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[43]] = glmmTMB(ProbDiv ~ stdExpFemale + stdQlty + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[44]] = glmmTMB(ProbDiv ~ stdExpFemale + stdLaying + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+
+## additive models with pair-bond duration
+mod_div[[45]] = glmmTMB(ProbDiv ~ stdPairBond + stdQlty + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[46]] = glmmTMB(ProbDiv ~ stdPairBond + stdLaying + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+
+## additive models with site quality
+mod_div[[47]] = glmmTMB(ProbDiv ~ stdQlty + stdLaying + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+
+## models with quadratic effect
+mod_div[[48]] = glmmTMB(ProbDiv ~ stdAgeMale + stdAgeMaleSq + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[49]] = glmmTMB(ProbDiv ~ stdAgeFemale + stdAgeFemaleSq + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[50]] = glmmTMB(ProbDiv ~ stdExpMale + stdExpMaleSq + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[51]] = glmmTMB(ProbDiv ~ stdExpFemale + stdExpFemaleSq + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[52]] = glmmTMB(ProbDiv ~ stdQlty + stdQltySq + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[53]] = glmmTMB(ProbDiv ~ stdPairBond + stdPairBondSq + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[54]] = glmmTMB(ProbDiv ~ stdLaying + stdLayingSq + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+
+## single effects models
+mod_div[[55]] = glmmTMB(ProbDiv ~ stdFledge + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[56]] = glmmTMB(ProbDiv ~ stdAgeMale + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[57]] = glmmTMB(ProbDiv ~ stdAgeFemale + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[58]] = glmmTMB(ProbDiv ~ stdExpMale + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[59]] = glmmTMB(ProbDiv ~ stdExpFemale + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[60]] = glmmTMB(ProbDiv ~ stdPairBond + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[61]] = glmmTMB(ProbDiv ~ stdQlty + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[62]] = glmmTMB(ProbDiv ~ stdLaying + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+
+mod_div[[63]] = glmmTMB(ProbDiv ~ stdYear + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[64]] = glmmTMB(ProbDiv ~ stdYear + I(stdYear^2) + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+mod_div[[65]] = glmmTMB(ProbDiv ~ 1 + (1|Year) + (1|Site) + (1|BandNo1) + (1|BandNo2), family = "binomial", data =  TBMU_divorce_clean)
+```
+
+
+Ranking all the models in increasing order of AICc and taking a subset to get to 95% of cumulative weights
+```{r}
+AIC_div = model.sel(mod_div, rank = "AICc")
+modavg_div = model.avg(AIC_div, beta = "none", subset = cumsum(weight)<=.95)
+```
+
+```{r include = FALSE}
+mod_div_Estimates = cbind(summary(modavg_div)$coefmat.subset[,c(1,3)], confint(modavg_div))
+```
+
+```{r echo = FALSE}
+mod_div_Estimates
+```
+the only important effect is that of the breeding experience of the female, with that of the male almost significant
+
+```{r}
+write.table(mod_div_Estimates,"estimates_divorce_TBMU.csv", row.names = TRUE, sep = ",")
+```
+
+```{r}
+div_Exp = TBMU_divorce_clean %>% mutate(ExpFemale = if_else(ExpFemale >= 15, 15, ExpFemale)) %>% group_by(ExpFemale) %>% summarise(PropDivFemale = mean(ProbDiv), N_Female = n()) %>% rename(Exp = ExpFemale)
+div_ExpM = TBMU_divorce_clean %>% mutate(ExpMale = if_else(ExpMale >= 15, 15, ExpMale)) %>% group_by(ExpMale) %>% summarise(PropDivMale = mean(ProbDiv), N_Male = n()) %>% rename(Exp = ExpMale)
+div_Exp = full_join(div_Exp, div_ExpM, by = "Exp")
+```
+
+```{r include=FALSE}
+plot_div_Exp = ggplot(data = div_Exp, aes(x = Exp)) + geom_point(aes(y = PropDivFemale, size = N_Female), colour = "red") + geom_point(aes(y = PropDivMale, size = N_Male), colour = "blue")
+```
+```{r echo = FALSE}
+plot_div_Exp
+```
+
+
