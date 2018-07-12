@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 ---
 title: "Divorce_TBMU"
 author: "Thomas Merkling"
@@ -232,3 +233,12 @@ plot_div_Exp
 ```
 
 
+=======
+---
+title: "Divorce_TBMU"
+author: "Thomas Merkling"
+date: "11 July 2018"
+output: html_document
+---
+
+>>>>>>> d0d0429f0bcedaa0b7f35cefca09e3b5e1db89ad
