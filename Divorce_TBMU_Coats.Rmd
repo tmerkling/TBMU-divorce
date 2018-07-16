@@ -256,6 +256,8 @@ mod_divQ[[66]] = glmmTMB(ProbDiv ~ 1 + (1|Year) + (1|Site) + (1|BandNo1) + (1|Ba
 ```
 
 
+Check simulated residuals using DHARMa package?
+
 Ranking all the models in increasing order of AICc and taking a subset to get to 95% of cumulative weights
 ```{r}
 AIC_div = model.sel(mod_div, rank = "AICc")
@@ -282,6 +284,7 @@ when considering the 95% of cumulative weights, the effects are the same but the
 write.table(mod_div_EstimatesD6,"estimates_D6_divorce_TBMU.csv", row.names = TRUE, sep = ",")
 write.table(mod_div_EstimatesP95,"estimates_P95_divorce_TBMU.csv", row.names = TRUE, sep = ",")
 ```
+
 
 effect of breeding experience
 ```{r}
@@ -315,17 +318,60 @@ plot_div_Age = ggplot(data = div_Age, aes(x = Age)) + geom_point(aes(y = PropDiv
 plot_div_Age
 ```
 
+because the effect of age is the same for both sex, I want to represent the combined effect ...
+```{r}
+TBMU_divorce_ageM = TBMU_divorce_cleanQ %>% dplyr::select (Site, Year, BandNo1, AgeMale, ProbDiv) %>% transmute(Site, Year, Band = BandNo1, Age = AgeMale, ProbDiv)
+TBMU_divorce_ageF = TBMU_divorce_cleanQ %>% dplyr::select (Site, Year, BandNo2, AgeFemale, ProbDiv) %>% transmute(Site, Year, Band = BandNo2, Age = AgeFemale, ProbDiv)
+TBMU_divorce_age = bind_rows(TBMU_divorce_ageF, TBMU_divorce_ageM)
+TBMU_divorce_age$Site = factor(TBMU_divorce_age$Site)
+TBMU_divorce_age$Band = factor(TBMU_divorce_age$Band)
+```
+
+had some issue with the predicted values when including random effects so used a glm but should fix this problem for publication!!
+```{r}
+mod_Age = glm(ProbDiv ~ Age, family = "binomial", data =  TBMU_divorce_age)
+```
+
+```{r}
+dat_Age = data.frame(Age = seq(5,20, by = 1))
+pred_Age = predict(mod_Age, dat_Age, se.fit = TRUE, type = "response")
+dat_Age$fit = pred_Age$fit
+dat_Age$se.fit = pred_Age$se.fit
+```
+
+```{r}
+div_tot_Age = TBMU_divorce_age %>% mutate(Age = if_else(as.numeric(Age) <=5, 5, if_else(as.numeric(Age) >= 20, 20, as.numeric(Age)))) %>% group_by(Age) %>% summarise(mean_PropDiv = mean(ProbDiv), SE_PropDiv = sd(ProbDiv)/sqrt(n()), N = n())
+```
+
+
+```{r include=FALSE}
+plot_div_tot_Age = ggplot(data = div_tot_Age, aes(x = Age)) + geom_point(aes(y = mean_PropDiv, size = N)) + geom_errorbar(aes(ymax = mean_PropDiv + SE_PropDiv, ymin = mean_PropDiv - SE_PropDiv))  + geom_line(data = dat_Age, aes(y = fit, x = Age), size = 2) + geom_line(data = dat_Age, aes(y = fit - se.fit, x = Age), lty =2) + geom_line(data = dat_Age, aes(y = fit + se.fit, x =  Age), lty = 2) +
+  theme_bw() + 
+  theme(axis.text = element_text(size = 50), axis.title = element_text(size = 50), legend.position = "none",panel.grid.major=element_blank(), panel.grid.minor=element_blank()) + labs(x = "Age (years)", y = "Probability of divorce") 
+```
+```{r echo = FALSE}
+png("Divorce ~ Age.png", width = 1600, height = 960, units = "px")
+
+plot_div_tot_Age
+dev.off()
+```
+
+
+
 effect of reproductive success
 ```{r}
 div_Fledge = TBMU_divorce_cleanQ %>% group_by(Fledge) %>% summarise(PropDiv = mean(ProbDiv), SE_PropDiv = sd(ProbDiv)/sqrt(n()), N = n())
 ```
 
 ```{r include=FALSE}
-plot_div_Fledge = ggplot(data = div_Fledge, aes(x = factor(Fledge))) + geom_point(aes(y = PropDiv, size = N)) + geom_errorbar(aes(ymax = PropDiv + SE_PropDiv, ymin = PropDiv - SE_PropDiv), width = 0.2) + theme_bw() + 
-  theme(axis.text = element_text(size = 15), axis.title = element_text(size = 17), legend.position = "none",panel.grid.major=element_blank(), panel.grid.minor=element_blank()) + labs(x = "Fledging success", y = "Probability of divorce") + scale_x_discrete(limits = c("0","1"),labels = c("NO","YES"))
+plot_div_Fledge = ggplot(data = div_Fledge, aes(x = factor(Fledge))) + geom_point(aes(y = PropDiv), size = 20) + geom_errorbar(aes(ymax = PropDiv + SE_PropDiv, ymin = PropDiv - SE_PropDiv), width = 0.2) + theme_bw() + 
+  theme(axis.text = element_text(size = 50), axis.title = element_text(size = 50), legend.position = "none",panel.grid.major=element_blank(), panel.grid.minor=element_blank()) + labs(x = "Fledging success", y = "Probability of divorce") + scale_x_discrete(limits = c("0","1"),labels = c("NO","YES")) + annotate("text", x = 1, y = 0.15, label = 'N = 54', size = 20) + annotate("text", x = 2, y = 0.13, label = 'N = 169', size = 20)
 ```
 ```{r echo = FALSE}
+png("Divorce ~ Fledge.png", width = 960, height = 960, units = "px")
+
 plot_div_Fledge
+dev.off()
 ```
 
 effect of site quality
@@ -339,4 +385,353 @@ plot_div_Qlty = ggplot(data = div_Qlty, aes(x = QLTY)) + geom_point(aes(y = Prop
 ```
 ```{r echo = FALSE}
 plot_div_Qlty
+```
+
+
+side analysis
+does the probability of fledging success increase with pair-bond duration?
+```{r}
+fledge_pairBond = TBMU_divorce_cleanQ %>% mutate(PairBond = ifelse(PairBond >= 4, 4, PairBond)) %>% group_by(PairBond,ProbDiv) %>% summarise(ProbFledge = mean(Fledge), SE_ProbFledge = sd(Fledge)/sqrt(n()), N_ProbFledge = n())
+fledge_pairBond$Divorce = as.factor(fledge_pairBond$ProbDiv)
+```
+
+```{r}
+plot_fledge_pairBond = ggplot(data = fledge_pairBond, aes(x = PairBond, y = ProbFledge)) + geom_point(aes( fill = Divorce), size = 15, shape = 21) + geom_errorbar(aes(ymin = ProbFledge - SE_ProbFledge, ymax = ProbFledge + SE_ProbFledge), width = 0.2) + theme_bw() + 
+  theme(axis.text = element_text(size = 50), axis.title = element_text(size = 50), legend.position = c(0.04,0.10),panel.grid.major=element_blank(), panel.grid.minor=element_blank()) + labs(x = "Pair-bond duration (years)", y = "Probability of fledging")
+```
+
+```{r}
+png("Fledge ~ PairBond.png", width = 1600, height = 960, units = "px")
+
+plot_fledge_pairBond
+dev.off()
+```
+
+
+
+# **2. Outcomes of divorce**
+
+## **a. Within-bird comparison before/after divorce**
+
+```{r}
+prepost_comp = read.table("prepost_div_comp_TBMU.csv", header = TRUE, sep = ",")
+```
+
+```{r}
+prepost_comp$Band = factor(prepost_comp$Band)
+```
+only a few individuals appear twice in the data, so probably no need to include a random effect for ID
+
+what is the range of age and breeding experience?
+```{r, include = FALSE}
+with(prepost_comp, hist(Age, breaks = 22))
+```
+only very few observations after 12 years...
+
+```{r}
+with(prepost_comp, hist(Exp, breaks = 10))
+```
+only very few observations after 6 years...
+
+grouping extreme ages and breeding experiences
+```{r}
+prepost_comp = prepost_comp %>% mutate_if(is.integer, as.numeric) %>% mutate(Age = if_else(Age >= 12, 12, Age), Exp = if_else(Exp >= 6, 6, Exp))
+```
+
+Will look into the effect of age, breeding experience and sex of a focal bird on the difference between its old and new mate. As there are different missing values for the different response variables, I'll create a new subset for each analyses.
+
+### Age difference
+
+```{r}
+age_prepost_comp = prepost_comp %>% dplyr::select(Band, Year, Band, Sex, Age, Exp, AgeDiff) %>% filter(!is.na(AgeDiff))
+```
+
+standardisation of the explanatory variables
+```{r}
+age_prepost_comp = age_prepost_comp %>% mutate(stdAge = rescale(Age), stdExp = rescale(Exp), stdSex = rescale(Sex))
+```
+
+how does the distribution of age difference look like
+```{r}
+with(age_prepost_comp, hist(AgeDiff, breaks = 20))
+```
+Not great ... will see how the residuals look like...
+
+```{r}
+mod_AgeDiff = list()
+
+mod_AgeDiff[[1]] = glmmTMB(AgeDiff ~ stdSex * stdAge + (1|Year), family = "gaussian", data = age_prepost_comp)
+mod_AgeDiff[[2]] = glmmTMB(AgeDiff ~ stdSex * stdExp + (1|Year), family = "gaussian", data = age_prepost_comp)
+
+mod_AgeDiff[[3]] = glmmTMB(AgeDiff ~ stdSex + stdAge + (1|Year), family = "gaussian", data = age_prepost_comp)
+mod_AgeDiff[[4]] = glmmTMB(AgeDiff ~ stdSex + stdExp + (1|Year), family = "gaussian", data = age_prepost_comp)
+
+mod_AgeDiff[[5]] = glmmTMB(AgeDiff ~ stdSex + (1|Year), family = "gaussian", data = age_prepost_comp)
+mod_AgeDiff[[6]] = glmmTMB(AgeDiff ~ stdAge + (1|Year), family = "gaussian", data = age_prepost_comp)
+mod_AgeDiff[[7]] = glmmTMB(AgeDiff ~ stdExp + (1|Year), family = "gaussian", data = age_prepost_comp)
+mod_AgeDiff[[8]] = glmmTMB(AgeDiff ~ 1 + (1|Year), family = "gaussian", data = age_prepost_comp)
+```
+
+```{r}
+hist(residuals(mod_AgeDiff[[8]], type = "pearson"))
+```
+looks alright
+
+Ranking all the models in increasing order of AICc and taking a subset to get to 95% of cumulative weights
+```{r}
+AIC_AgeDiff = model.sel(mod_AgeDiff, rank = "AICc")
+modavg_AgeDiffD6 = model.avg(mod_AgeDiff, beta = "none", subset = delta <= 6)
+```
+
+```{r, include=FALSE}
+mod_AgeDiff_EstimatesD6 = cbind(summary(modavg_AgeDiffD6)$coefmat.subset[,c(1,3)], confint(modavg_AgeDiffD6))
+```
+```{r}
+mod_AgeDiff_EstimatesD6
+```
+No efffect of any explanatory covariables. The intercept is weakly positive suggesting that birds tend to repair with an older bird...
+
+```{r}
+write.table(mod_AgeDiff_EstimatesD6, "estimates_D6_AgeDiff_TBMU.csv",row.names = TRUE, sep = ",")
+```
+
+
+### Breeding experience difference
+
+```{r}
+exp_prepost_comp = prepost_comp %>% dplyr::select(Band, Year, Band, Sex, Age, Exp, ExpDiff) %>% filter(!is.na(ExpDiff))
+```
+
+standardisation of the explanatory variables
+```{r}
+exp_prepost_comp = exp_prepost_comp %>% mutate(stdAge = rescale(Age), stdExp = rescale(Exp), stdSex = rescale(Sex))
+```
+
+how does the distribution of exp difference look like
+```{r}
+with(exp_prepost_comp, hist(ExpDiff, breaks = 20))
+```
+Not great ... will see how the residuals look like...
+
+```{r}
+mod_ExpDiff = list()
+
+mod_ExpDiff[[1]] = glmmTMB(ExpDiff ~ stdSex * stdAge + (1|Year), family = "gaussian", data = exp_prepost_comp)
+mod_ExpDiff[[2]] = glmmTMB(ExpDiff ~ stdSex * stdExp + (1|Year), family = "gaussian", data = exp_prepost_comp)
+
+mod_ExpDiff[[3]] = glmmTMB(ExpDiff ~ stdSex + stdAge + (1|Year), family = "gaussian", data = exp_prepost_comp)
+mod_ExpDiff[[4]] = glmmTMB(ExpDiff ~ stdSex + stdExp + (1|Year), family = "gaussian", data = exp_prepost_comp)
+
+mod_ExpDiff[[5]] = glmmTMB(ExpDiff ~ stdSex + (1|Year), family = "gaussian", data = exp_prepost_comp)
+mod_ExpDiff[[6]] = glmmTMB(ExpDiff ~ stdAge + (1|Year), family = "gaussian", data = exp_prepost_comp)
+mod_ExpDiff[[7]] = glmmTMB(ExpDiff ~ stdExp + (1|Year), family = "gaussian", data = exp_prepost_comp)
+mod_ExpDiff[[8]] = glmmTMB(ExpDiff ~ 1 + (1|Year), family = "gaussian", data = exp_prepost_comp)
+```
+
+```{r}
+hist(residuals(mod_ExpDiff[[8]], type = "pearson"))
+```
+looks alright
+
+Ranking all the models in increasing order of AICc and taking a subset to get to 95% of cumulative weights
+```{r}
+AIC_ExpDiff = model.sel(mod_ExpDiff, rank = "AICc")
+modavg_ExpDiffD6 = model.avg(mod_ExpDiff, beta = "none", subset = delta <= 6)
+```
+
+```{r, include=FALSE}
+mod_ExpDiff_EstimatesD6 = cbind(summary(modavg_ExpDiffD6)$coefmat.subset[,c(1,3)], confint(modavg_ExpDiffD6))
+```
+```{r}
+mod_ExpDiff_EstimatesD6
+```
+No efffect of any explanatory covariables. The intercept isn't really different from zero ...
+
+```{r}
+write.table(mod_ExpDiff_EstimatesD6, "estimates_D6_ExpDiff_TBMU.csv",row.names = TRUE, sep = ",")
+```
+
+
+### Site quality difference
+
+```{r}
+qlty_prepost_comp = prepost_comp %>% dplyr::select(Band, Year, Band, Sex, Age, Exp, QltyDiff) %>% filter(!is.na(QltyDiff))
+```
+
+standardisation of the explanatory variables
+```{r}
+qlty_prepost_comp = qlty_prepost_comp %>% mutate(stdAge = rescale(Age), stdExp = rescale(Exp), stdSex = rescale(Sex))
+```
+
+how does the distribution of qlty difference look like
+```{r}
+with(qlty_prepost_comp, hist(QltyDiff, breaks = 20))
+```
+Not great ... will see how the residuals look like...
+
+```{r}
+mod_QltyDiff = list()
+
+mod_QltyDiff[[1]] = glmmTMB(QltyDiff ~ stdSex * stdAge + (1|Year), family = "gaussian", data = qlty_prepost_comp)
+mod_QltyDiff[[2]] = glmmTMB(QltyDiff ~ stdSex * stdExp + (1|Year), family = "gaussian", data = qlty_prepost_comp)
+
+mod_QltyDiff[[3]] = glmmTMB(QltyDiff ~ stdSex + stdAge + (1|Year), family = "gaussian", data = qlty_prepost_comp)
+mod_QltyDiff[[4]] = glmmTMB(QltyDiff ~ stdSex + stdExp + (1|Year), family = "gaussian", data = qlty_prepost_comp)
+
+mod_QltyDiff[[5]] = glmmTMB(QltyDiff ~ stdSex + (1|Year), family = "gaussian", data = qlty_prepost_comp)
+mod_QltyDiff[[6]] = glmmTMB(QltyDiff ~ stdAge + (1|Year), family = "gaussian", data = qlty_prepost_comp)
+mod_QltyDiff[[7]] = glmmTMB(QltyDiff ~ stdExp + (1|Year), family = "gaussian", data = qlty_prepost_comp)
+mod_QltyDiff[[8]] = glmmTMB(QltyDiff ~ 1 + (1|Year), family = "gaussian", data = qlty_prepost_comp)
+```
+
+```{r}
+hist(residuals(mod_QltyDiff[[8]], type = "pearson"))
+```
+looks alright
+
+Ranking all the models in increasing order of AICc and taking a subset to get to 95% of cumulative weights
+```{r}
+AIC_QltyDiff = model.sel(mod_QltyDiff, rank = "AICc")
+modavg_QltyDiffD6 = model.avg(mod_QltyDiff, beta = "none", subset = delta <= 6)
+```
+
+```{r, include=FALSE}
+mod_QltyDiff_EstimatesD6 = cbind(summary(modavg_QltyDiffD6)$coefmat.subset[,c(1,3)], confint(modavg_QltyDiffD6))
+```
+```{r}
+mod_QltyDiff_EstimatesD6
+```
+No efffect of any explanatory covariables. The intercept isn't different from zero ...
+
+```{r}
+write.table(mod_QltyDiff_EstimatesD6, "estimates_D6_QltyDiff_TBMU.csv",row.names = TRUE, sep = ",")
+```
+
+
+### Laying date difference
+
+```{r}
+lay_prepost_comp = prepost_comp %>% dplyr::select(Band, Year, Band, Sex, Age, Exp, LayingDiff) %>% filter(!is.na(LayingDiff))
+```
+
+standardisation of the explanatory variables
+```{r}
+lay_prepost_comp = lay_prepost_comp %>% mutate(stdAge = rescale(Age), stdExp = rescale(Exp), stdSex = rescale(Sex))
+```
+
+how does the distribution of lay difference look like
+```{r}
+with(lay_prepost_comp, hist(LayingDiff, breaks = 20))
+```
+Not great ... looks skewed towards negative values slightly
+
+```{r}
+mod_LayDiff = list()
+
+mod_LayDiff[[1]] = glmmTMB(LayingDiff ~ stdSex * stdAge + (1|Year), family = "gaussian", data = lay_prepost_comp)
+mod_LayDiff[[2]] = glmmTMB(LayingDiff ~ stdSex * stdExp + (1|Year), family = "gaussian", data = lay_prepost_comp)
+
+mod_LayDiff[[3]] = glmmTMB(LayingDiff ~ stdSex + stdAge + (1|Year), family = "gaussian", data = lay_prepost_comp)
+mod_LayDiff[[4]] = glmmTMB(LayingDiff ~ stdSex + stdExp + (1|Year), family = "gaussian", data = lay_prepost_comp)
+
+mod_LayDiff[[5]] = glmmTMB(LayingDiff ~ stdSex + (1|Year), family = "gaussian", data = lay_prepost_comp)
+mod_LayDiff[[6]] = glmmTMB(LayingDiff ~ stdAge + (1|Year), family = "gaussian", data = lay_prepost_comp)
+mod_LayDiff[[7]] = glmmTMB(LayingDiff ~ stdExp + (1|Year), family = "gaussian", data = lay_prepost_comp)
+mod_LayDiff[[8]] = glmmTMB(LayingDiff ~ 1 + (1|Year), family = "gaussian", data = lay_prepost_comp)
+```
+
+```{r}
+hist(residuals(mod_LayDiff[[8]], type = "pearson"))
+```
+looks alright
+
+Ranking all the models in increasing order of AICc and taking a subset to get to 95% of cumulative weights
+```{r}
+AIC_LayDiff = model.sel(mod_LayDiff, rank = "AICc")
+modavg_LayDiffD6 = model.avg(mod_LayDiff, beta = "none", subset = delta <= 6)
+```
+
+```{r, include=FALSE}
+mod_LayDiff_EstimatesD6 = cbind(summary(modavg_LayDiffD6)$coefmat.subset[,c(1,3)], confint(modavg_LayDiffD6))
+```
+```{r}
+mod_LayDiff_EstimatesD6
+```
+No efffect of any explanatory covariables. The intercept isn't different from zero ...
+
+```{r}
+write.table(mod_LayDiff_EstimatesD6, "estimates_D6_LayDiff_TBMU.csv",row.names = TRUE, sep = ",")
+```
+
+
+### Reprod success difference
+
+```{r}
+fledge_prepost_comp = prepost_comp %>% dplyr::select(Band, Year, Band, Sex, Age, Exp, FledgeDiff) %>% filter(!is.na(FledgeDiff))
+```
+
+standardisation of the explanatory variables and recoding of response variable
+```{r}
+fledge_prepost_comp = fledge_prepost_comp %>% mutate(stdAge = rescale(Age), stdExp = rescale(Exp), stdSex = rescale(Sex), FledgeDiff = if_else(FledgeDiff == -1, 0, if_else(FledgeDiff == 0, 0.5, 1)))
+```
+
+```{r}
+FledgeWeights = rep(2, nrow(fledge_prepost_comp))
+```
+
+
+```{r}
+mod_FledgeDiff = list()
+
+mod_FledgeDiff[[1]] = glmmTMB(FledgeDiff ~ stdSex * stdAge + (1|Year), weights = FledgeWeights, family = "binomial", data = fledge_prepost_comp)
+mod_FledgeDiff[[2]] = glmmTMB(FledgeDiff ~ stdSex * stdExp + (1|Year), weights = FledgeWeights, family = "binomial", data = fledge_prepost_comp)
+
+mod_FledgeDiff[[3]] = glmmTMB(FledgeDiff ~ stdSex + stdAge + (1|Year), weights = FledgeWeights, family = "binomial", data = fledge_prepost_comp)
+mod_FledgeDiff[[4]] = glmmTMB(FledgeDiff ~ stdSex + stdExp + (1|Year), weights = FledgeWeights, family = "binomial", data = fledge_prepost_comp)
+
+mod_FledgeDiff[[5]] = glmmTMB(FledgeDiff ~ stdSex + (1|Year), weights = FledgeWeights, family = "binomial", data = fledge_prepost_comp)
+mod_FledgeDiff[[6]] = glmmTMB(FledgeDiff ~ stdAge + (1|Year), weights = FledgeWeights, family = "binomial", data = fledge_prepost_comp)
+mod_FledgeDiff[[7]] = glmmTMB(FledgeDiff ~ stdExp + (1|Year), weights = FledgeWeights, family = "binomial", data = fledge_prepost_comp)
+mod_FledgeDiff[[8]] = glmmTMB(FledgeDiff ~ 1 + (1|Year), weights = FledgeWeights, family = "binomial", data = fledge_prepost_comp)
+```
+
+Ranking all the models in increasing order of AICc and taking a subset to get to 95% of cumulative weights
+```{r}
+AIC_FledgeDiff = model.sel(mod_FledgeDiff, rank = "AICc")
+modavg_FledgeDiffD6 = model.avg(mod_FledgeDiff, beta = "none", subset = delta <= 6)
+```
+
+```{r, include=FALSE}
+mod_FledgeDiff_EstimatesD6 = cbind(summary(modavg_FledgeDiffD6)$coefmat.subset[,c(1,3)], confint(modavg_FledgeDiffD6))
+```
+```{r}
+mod_FledgeDiff_EstimatesD6
+```
+No efffect of any explanatory covariables. The intercept isn't different from zero ...
+
+```{r}
+write.table(mod_FledgeDiff_EstimatesD6, "estimates_D6_FledgeDiff_TBMU.csv",row.names = TRUE, sep = ",")
+```
+
+
+combine all the intercepts of all the analyses to compare the different variables
+```{r}
+all_prepost_comp = data.frame(Response = c("Age","Breeding experience","Site quality","Laying date","Fledging success"), Intercept = rep(0,5), SE = rep(0,5))
+all_prepost_comp[1,c(2:3)] = mod_AgeDiff_EstimatesD6[1,c(1:2)]
+all_prepost_comp[2,c(2:3)] = mod_ExpDiff_EstimatesD6[1,c(1:2)]
+all_prepost_comp[3,c(2:3)] = mod_QltyDiff_EstimatesD6[1,c(1:2)]
+all_prepost_comp[4,c(2:3)] = mod_LayDiff_EstimatesD6[1,c(1:2)]
+all_prepost_comp[5,c(2:3)] = mod_FledgeDiff_EstimatesD6[1,c(1:2)]
+```
+
+```{r}
+plot_comp = ggplot(data = all_prepost_comp, aes(y = Intercept, x = Response)) + geom_point(size = 15) + geom_errorbar(aes(ymax = Intercept + SE, ymin = Intercept - SE), width = 0.2) + theme_bw() + 
+  theme(axis.text = element_text(size = 50), axis.title = element_text(size = 50), legend.position = "none",panel.grid.major=element_blank(), panel.grid.minor=element_blank()) + labs(y = "Difference between new and old (divorced) mate", x = "Variable") + geom_hline(yintercept = 0, linetype = 2)  + coord_flip()
+```
+
+```{r}
+png("Difference between new and old mate.png", width = 1600, height = 960, units = "px")
+
+plot_comp
+dev.off()
 ```

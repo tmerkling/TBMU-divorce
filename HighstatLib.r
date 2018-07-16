@@ -1,5 +1,3 @@
-<<<<<<< HEAD
-
 ##################################################################
 #Below are some functions that we took from the pairs help file and
 #modified, or wrote ourselves. You need to copy and paste all these commands
@@ -166,7 +164,6 @@ corvif <- function(dataz) {
     print(myvif(lm_mod))
 }
 
-=======
 
 ##################################################################
 #Below are some functions that we took from the pairs help file and
@@ -333,5 +330,3 @@ corvif <- function(dataz) {
     cat("\n\nVariance inflation factors\n\n")
     print(myvif(lm_mod))
 }
-
->>>>>>> d0d0429f0bcedaa0b7f35cefca09e3b5e1db89ad
