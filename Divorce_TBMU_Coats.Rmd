@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r, warning = FALSE, message = FALSE, include = FALSE}
-setwd("D:/Thomas/Google Drive/postdoc/FQRNT murre project/murre data/TBMU-divorce")
+setwd("D:/Thomas/Google Drive/postdoc/FQRNT_murre_project/murre_data/TBMU-divorce")
 ```
 
 ```{r}
@@ -734,4 +734,368 @@ png("Difference between new and old mate.png", width = 1600, height = 960, units
 
 plot_comp
 dev.off()
+```
+
+
+## **b. Cost of partner change: comparison divorced and widowed birds**
+
+```{r}
+widow_comp = read.table("widow_indiv_TBMU.csv", header = TRUE, sep = ",")
+```
+
+```{r}
+widow_comp$Band = factor(widow_comp$Band)
+widow_comp$Status = "WIDOWED"
+widow_comp = widow_comp[,c(1:6, 12:18)]
+```
+
+need to combine it with the divorce data.
+```{r}
+div_comp = read.table("prepost_div_comp_TBMU.csv", header = TRUE, sep = ",")
+```
+
+```{r}
+div_comp$Band = factor(div_comp$Band)
+div_comp$Status = "DIVORCED"
+div_comp = div_comp[,c(1:6, 12:18)]
+```
+
+```{r}
+widow_div_comp = bind_rows(div_comp,widow_comp) %>% mutate_if(is.character, as.factor)
+```
+
+inspect variation in differences between new and old mates
+```{r}
+hist(widow_div_comp$AgeDiff, breaks = 30)
+```
+```{r}
+hist(widow_div_comp$ExpDiff, breaks = 30)
+```
+one extreme positive value!
+
+```{r}
+hist(widow_div_comp$QltyDiff, breaks = 20)
+```
+most individuals did not change
+
+```{r}
+hist(widow_div_comp$LayingDiff, breaks = 30)
+```
+```{r}
+hist(widow_div_comp$FledgeDiff)
+```
+
+Will need to have Year, Band and Site as random effects
+
+Goal is to look at whether there is a difference between divorced birds and widowed concerning who they remate with and whether it is sex-specific
+
+### Age difference
+
+```{r}
+age_widiv_comp = widow_div_comp %>% dplyr::select(Band, Year, Site, Sex, Age, AgeDiff, Status) %>% filter(!is.na(AgeDiff))
+```
+
+standardisation of the explanatory variables
+```{r}
+library(arm)
+age_widiv_comp = age_widiv_comp %>% mutate(stdSex = rescale(Sex), stdStatus = rescale(Status))
+```
+
+how does the distribution of age difference look like
+```{r}
+with(age_widiv_comp, hist(AgeDiff, breaks = 20))
+```
+Will have to be careful about the extreme positive age differences
+
+Having Year, Site and Band as random effects caused some convergence issues, so I don't consider Site as it has a variance almost equal to zero.
+```{r}
+widiv_AgeDiff = list()
+
+library(glmmTMB)
+widiv_AgeDiff[[1]] = glmmTMB(AgeDiff ~ stdSex * stdStatus + (1|Year) + (1|Band), family = "gaussian", data = age_widiv_comp)
+widiv_AgeDiff[[2]] = glmmTMB(AgeDiff ~ stdSex + stdStatus + (1|Year) + (1|Band), family = "gaussian", data = age_widiv_comp)
+widiv_AgeDiff[[3]] = glmmTMB(AgeDiff ~ stdSex +  (1|Year) + (1|Band), family = "gaussian", data = age_widiv_comp)
+widiv_AgeDiff[[4]] = glmmTMB(AgeDiff ~ stdStatus +  (1|Year) + (1|Band), family = "gaussian", data = age_widiv_comp)
+widiv_AgeDiff[[5]] = glmmTMB(AgeDiff ~ 1 + (1|Year) +  (1|Band), family = "gaussian", data = age_widiv_comp)
+```
+
+```{r}
+hist(residuals(widiv_AgeDiff[[1]], type = "pearson"))
+```
+looks alright
+
+Ranking all the models in increasing order of AICc and taking a subset to get to 95% of cumulative weights
+```{r}
+library(MuMIn)
+AIC_widiv_AgeDiff = model.sel(widiv_AgeDiff, rank = "AICc")
+modavg_widiv_AgeDiffD6 = model.avg(widiv_AgeDiff, beta = "none", subset = delta <= 6)
+```
+
+```{r, include=FALSE}
+widiv_AgeDiff_EstimatesD6 = cbind(summary(modavg_widiv_AgeDiffD6)$coefmat.subset[,c(1,3)], confint(modavg_widiv_AgeDiffD6))
+```
+```{r}
+widiv_AgeDiff_EstimatesD6
+```
+Negative effect of status! Widowed birds remate with younger birds than their previous partner as compared to divorced birds, probably because they are older...
+
+```{r}
+boxplot(Age ~ Status, data = age_widiv_comp)
+```
+Indeed, widowing happens later in life.
+
+```{r}
+write.table(widiv_AgeDiff_EstimatesD6, "estimates_D6_widiv_AgeDiff_TBMU.csv",row.names = TRUE, sep = ",")
+```
+
+
+
+### Breeding experience difference
+
+```{r}
+exp_widiv_comp = widow_div_comp %>% dplyr::select(Band, Year, Site, Sex, Exp, ExpDiff, Status) %>% filter(!is.na(ExpDiff))
+```
+
+standardisation of the explanatory variables
+```{r}
+library(arm)
+exp_widiv_comp = exp_widiv_comp %>% mutate(stdSex = rescale(Sex), stdStatus = rescale(Status))
+```
+
+how does the distribution of age difference look like
+```{r}
+with(exp_widiv_comp, hist(ExpDiff, breaks = 20))
+```
+only a few large positive differences
+
+Having Year, Site and Band as random effects caused some convergence issues, so I don't consider Site as it has a variance almost equal to zero.
+```{r}
+widiv_ExpDiff = list()
+
+library(glmmTMB)
+widiv_ExpDiff[[1]] = glmmTMB(ExpDiff ~ stdSex * stdStatus + (1|Year) + (1|Band), family = "gaussian", data = exp_widiv_comp)
+widiv_ExpDiff[[2]] = glmmTMB(ExpDiff ~ stdSex + stdStatus + (1|Year) + (1|Band), family = "gaussian", data = exp_widiv_comp)
+widiv_ExpDiff[[3]] = glmmTMB(ExpDiff ~ stdSex +  (1|Year) + (1|Band), family = "gaussian", data = exp_widiv_comp)
+widiv_ExpDiff[[4]] = glmmTMB(ExpDiff ~ stdStatus +  (1|Year) + (1|Band), family = "gaussian", data = exp_widiv_comp)
+widiv_ExpDiff[[5]] = glmmTMB(ExpDiff ~ 1 + (1|Year) +  (1|Band), family = "gaussian", data = exp_widiv_comp)
+```
+
+```{r}
+hist(residuals(widiv_ExpDiff[[1]], type = "pearson"))
+```
+looks alright
+
+Ranking all the models in increasing order of AICc and taking a subset to get to 95% of cumulative weights
+```{r}
+library(MuMIn)
+AIC_widiv_ExpDiff = model.sel(widiv_ExpDiff, rank = "AICc")
+modavg_widiv_ExpDiffD6 = model.avg(widiv_ExpDiff, beta = "none", subset = delta <= 6)
+```
+
+```{r, include=FALSE}
+widiv_ExpDiff_EstimatesD6 = cbind(summary(modavg_widiv_ExpDiffD6)$coefmat.subset[,c(1,3)], confint(modavg_widiv_ExpDiffD6))
+```
+```{r}
+widiv_ExpDiff_EstimatesD6
+```
+No effect of any of the considered variables
+
+```{r}
+write.table(widiv_ExpDiff_EstimatesD6, "estimates_D6_widiv_ExpDiff_TBMU.csv",row.names = TRUE, sep = ",")
+```
+
+
+### Site quality difference
+
+First looking at whether birds moved or not depends on sex and status and then focusing on those who moved
+
+```{r}
+qlty_widiv_comp = widow_div_comp %>% dplyr::select(Band, Year, Site, Sex, QltyDiff, Moved, Status) %>% filter(!is.na(QltyDiff))
+```
+
+standardisation of the explanatory variables
+```{r}
+library(arm)
+qlty_widiv_comp = qlty_widiv_comp %>% mutate(stdSex = rescale(Sex), stdStatus = rescale(Status), binMoved = if_else(Moved == "YES", 1, 0))
+```
+
+did individual move more after divorce?
+```{r}
+with(qlty_widiv_comp, table(Moved, Status))
+```
+YES! Probability of moving much higher after divorce than after widowing
+
+```{r}
+widiv_Moved = list()
+
+library(glmmTMB)
+widiv_Moved[[1]] = glmmTMB(binMoved ~ stdSex * stdStatus + (1|Year) + (1|Band) + (1|Site), family = "binomial", data = qlty_widiv_comp)
+widiv_Moved[[2]] = glmmTMB(binMoved ~ stdSex + stdStatus + (1|Year) + (1|Band) + (1|Site), family = "binomial", data = qlty_widiv_comp)
+widiv_Moved[[3]] = glmmTMB(binMoved ~ stdSex +  (1|Year) + (1|Band) + (1|Site), family = "binomial", data = qlty_widiv_comp)
+widiv_Moved[[4]] = glmmTMB(binMoved ~ stdStatus +  (1|Year) + (1|Band) + (1|Site), family = "binomial", data = qlty_widiv_comp)
+widiv_Moved[[5]] = glmmTMB(binMoved ~ 1 + (1|Year) +  (1|Band) + (1|Site), family = "binomial", data = qlty_widiv_comp)
+```
+
+Ranking all the models in increasing order of AICc and taking a subset to get to 95% of cumulative weights
+```{r}
+library(MuMIn)
+AIC_widiv_Moved = model.sel(widiv_Moved, rank = "AICc")
+modavg_widiv_MovedD6 = model.avg(widiv_Moved, beta = "none", subset = delta <= 6)
+```
+
+```{r, include=FALSE}
+widiv_Moved_EstimatesD6 = cbind(summary(modavg_widiv_MovedD6)$coefmat.subset[,c(1,3)], confint(modavg_widiv_MovedD6))
+```
+```{r}
+widiv_Moved_EstimatesD6
+```
+Negative effect of status: probability of moving lower for widowed birds
+
+```{r}
+write.table(widiv_Moved_EstimatesD6, "estimates_D6_widiv_Moved_TBMU.csv",row.names = TRUE, sep = ",")
+```
+
+Now focusing only on birds that moved
+```{r}
+movedY_qlty_widiv_comp = qlty_widiv_comp %>% filter(Moved == "YES")
+```
+
+how does the distribution of age difference look like
+```{r}
+with(movedY_qlty_widiv_comp, hist(QltyDiff, breaks = 20))
+```
+
+gives convergence issues with the 3 random effects, Year has very low variance so removed. Don't consider interaction because of low sample size
+```{r}
+widiv_QltyDiff = list()
+
+library(glmmTMB)
+#widiv_QltyDiff[[1]] = glmmTMB(QltyDiff ~ stdSex * stdStatus + (1|Band) + (1|Site), family = "gaussian", data = movedY_qlty_widiv_comp)
+widiv_QltyDiff[[1]] = glmmTMB(QltyDiff ~ stdSex + stdStatus +  (1|Band) + (1|Site), family = "gaussian", data = movedY_qlty_widiv_comp)
+widiv_QltyDiff[[2]] = glmmTMB(QltyDiff ~ stdSex +   (1|Band) + (1|Site), family = "gaussian", data = movedY_qlty_widiv_comp)
+widiv_QltyDiff[[3]] = glmmTMB(QltyDiff ~ stdStatus +   (1|Band) + (1|Site), family = "gaussian", data = movedY_qlty_widiv_comp)
+widiv_QltyDiff[[4]] = glmmTMB(QltyDiff ~ 1 + (1|Band) + (1|Site), family = "gaussian", data = movedY_qlty_widiv_comp)
+```
+
+```{r}
+hist(residuals(widiv_QltyDiff[[1]], type = "pearson"))
+```
+
+Ranking all the models in increasing order of AICc and taking a subset to get to 95% of cumulative weights
+```{r}
+library(MuMIn)
+AIC_widiv_QltyDiff = model.sel(widiv_QltyDiff, rank = "AICc")
+modavg_widiv_QltyDiffD6 = model.avg(widiv_QltyDiff, beta = "none", subset = delta <= 6)
+```
+
+```{r, include=FALSE}
+widiv_QltyDiff_EstimatesD6 = cbind(summary(modavg_widiv_QltyDiffD6)$coefmat.subset[,c(1,3)], confint(modavg_widiv_QltyDiffD6))
+```
+```{r}
+widiv_QltyDiff_EstimatesD6
+```
+No effect of any of the considered variables
+
+```{r}
+write.table(widiv_QltyDiff_EstimatesD6, "estimates_D6_widiv_QltyDiff_TBMU.csv",row.names = TRUE, sep = ",")
+```
+
+
+### Laying date difference
+
+```{r}
+lay_widiv_comp = widow_div_comp %>% dplyr::select(Band, Year, Site, Sex, LayingDiff, Status) %>% filter(!is.na(LayingDiff))
+```
+
+standardisation of the explanatory variables
+```{r}
+library(arm)
+lay_widiv_comp = lay_widiv_comp %>% mutate(stdSex = rescale(Sex), stdStatus = rescale(Status))
+```
+
+how does the distribution of age difference look like
+```{r}
+with(lay_widiv_comp, hist(LayingDiff, breaks = 20))
+```
+alright
+
+Having Year, Site and Band as random effects caused some convergence issues, so I don't consider Site as it has a variance almost equal to zero.
+```{r}
+widiv_LayingDiff = list()
+
+library(glmmTMB)
+widiv_LayingDiff[[1]] = glmmTMB(LayingDiff ~ stdSex * stdStatus + (1|Year) + (1|Band) + (1|Site), family = "gaussian", data = lay_widiv_comp)
+widiv_LayingDiff[[2]] = glmmTMB(LayingDiff ~ stdSex + stdStatus + (1|Year) + (1|Band) + (1|Site), family = "gaussian", data = lay_widiv_comp)
+widiv_LayingDiff[[3]] = glmmTMB(LayingDiff ~ stdSex +  (1|Year) + (1|Band) + (1|Site), family = "gaussian", data = lay_widiv_comp)
+widiv_LayingDiff[[4]] = glmmTMB(LayingDiff ~ stdStatus +  (1|Year) + (1|Band) + (1|Site), family = "gaussian", data = lay_widiv_comp)
+widiv_LayingDiff[[5]] = glmmTMB(LayingDiff ~ 1 + (1|Year) +  (1|Band) + (1|Site), family = "gaussian", data = lay_widiv_comp)
+```
+
+```{r}
+hist(residuals(widiv_LayingDiff[[1]], type = "pearson"))
+```
+looks alright
+
+Ranking all the models in increasing order of AICc and taking a subset to get to 95% of cumulative weights
+```{r}
+library(MuMIn)
+AIC_widiv_LayingDiff = model.sel(widiv_LayingDiff, rank = "AICc")
+modavg_widiv_LayingDiffD6 = model.avg(widiv_LayingDiff, beta = "none", subset = delta <= 6)
+```
+
+```{r, include=FALSE}
+widiv_LayingDiff_EstimatesD6 = cbind(summary(modavg_widiv_LayingDiffD6)$coefmat.subset[,c(1,3)], confint(modavg_widiv_LayingDiffD6))
+```
+```{r}
+widiv_LayingDiff_EstimatesD6
+```
+No effect of any of the considered variables
+
+```{r}
+write.table(widiv_LayingDiff_EstimatesD6, "estimates_D6_widiv_LayingDiff_TBMU.csv",row.names = TRUE, sep = ",")
+```
+
+
+### Reprod success difference
+
+```{r}
+fledge_widiv_comp = widow_div_comp %>% dplyr::select(Band, Year, Site, Sex, FledgeDiff, Status) %>% filter(!is.na(FledgeDiff))
+```
+
+standardisation of the explanatory variables
+```{r}
+library(arm)
+fledge_widiv_comp = fledge_widiv_comp %>% mutate(stdSex = rescale(Sex), stdStatus = rescale(Status), FledgeDiff = as.integer(if_else(FledgeDiff == -1, 0, if_else(FledgeDiff == 0, 0.5, 1))))
+```
+
+
+Having Year, Site and Band as random effects caused some convergence issues, so I don't consider Site as it has a variance almost equal to zero.
+```{r}
+widiv_FledgeDiff = list()
+
+library(glmmTMB)
+widiv_FledgeDiff[[1]] = glmmTMB(FledgeDiff ~ stdSex * stdStatus + (1|Year) + (1|Band) + (1|Site), family = "binomial", data = fledge_widiv_comp)
+widiv_FledgeDiff[[2]] = glmmTMB(FledgeDiff ~ stdSex + stdStatus + (1|Year) + (1|Band) + (1|Site), family = "binomial", data = fledge_widiv_comp)
+widiv_FledgeDiff[[3]] = glmmTMB(FledgeDiff ~ stdSex +  (1|Year) + (1|Band) + (1|Site), family = "binomial", data = fledge_widiv_comp)
+widiv_FledgeDiff[[4]] = glmmTMB(FledgeDiff ~ stdStatus +  (1|Year) + (1|Band) + (1|Site), family = "binomial", data = fledge_widiv_comp)
+widiv_FledgeDiff[[5]] = glmmTMB(FledgeDiff ~ 1 + (1|Year) +  (1|Band) + (1|Site), family = "binomial", data = fledge_widiv_comp)
+```
+
+Ranking all the models in increasing order of AICc and taking a subset to get to 95% of cumulative weights
+```{r}
+library(MuMIn)
+AIC_widiv_FledgeDiff = model.sel(widiv_FledgeDiff, rank = "AICc")
+modavg_widiv_FledgeDiffD6 = model.avg(widiv_FledgeDiff, beta = "none", subset = delta <= 6)
+```
+
+```{r, include=FALSE}
+widiv_FledgeDiff_EstimatesD6 = cbind(summary(modavg_widiv_FledgeDiffD6)$coefmat.subset[,c(1,3)], confint(modavg_widiv_FledgeDiffD6))
+```
+```{r}
+widiv_FledgeDiff_EstimatesD6
+```
+No effect of any of the considered variables
+
+```{r}
+write.table(widiv_FledgeDiff_EstimatesD6, "estimates_D6_widiv_FledgeDiff_TBMU.csv",row.names = TRUE, sep = ",")
 ```
