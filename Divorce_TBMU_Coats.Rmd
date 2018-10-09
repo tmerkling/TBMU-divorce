@@ -10,15 +10,21 @@ setwd("D:/Thomas/Google Drive/postdoc/FQRNT_murre_project/murre_data/TBMU-divorc
 ```
 
 ```{r}
-library(dplyr)
+library(ggplot2)
+library(tidyverse)
 library(glmmTMB)
 library(MuMIn)
 library(corrplot)
 library(arm)
-library(ggplot2)
 library(DHARMa)
 library(brms)
 library(shinystan)
+library(tidybayes)
+```
+
+loading brms model selection functions
+```{r}
+source(file = "brms_modsel_func.R")
 ```
 
 
@@ -36,6 +42,8 @@ TBMU_divorce = TBMU_divorce %>% filter(Outcome != "DEAD")
 dim(TBMU_divorce) # 952  20
 TBMU_divorce = TBMU_divorce %>% mutate(ProbDiv = if_else(Outcome == "DIV",1,0))
 ```
+
+## Data exploration
 
 data exploration: how many missing data for each 
 ```{r }
@@ -153,6 +161,8 @@ Qlty_graph
 ```
 maybe group qlty lower than 0.25?
 
+## Grouping variables
+
 sample size is quite small for the extreme values of ages, breeding experience and pair-bond, so I'll group them together. Had to play on where to group because of convergence issues!
 to facilitate model convergence and allow a better comparison of effects across models, all the variables are standardised
 I'm also creating variables to look at quadratic effects
@@ -169,61 +179,160 @@ TBMU_divorce_outExpQ = TBMU_divorce_outExpQ %>% mutate_if(is.integer, as.numeric
         mutate(stdAgeMaleSq = I(stdAgeMale^2), stdAgeFemaleSq = I(stdAgeFemale^2), stdQltySq = I(stdQlty^2), stdLayingSq = I(stdLaying^2), stdYeaSq = I(stdYear^2))
 ```
 
+
+## Bayesian models with brms
+
 I won't consider interactions with more than 2 terms and not models with age and breeding experience together
 Had some convergence issues when using lme4 or glmmTMB so moved to brms and a Bayesian framework ...
 
+Following code found on the brms Github by #keesterbrugge I try to use list-column format as suggested in the R for Data Science book
+```{r}
+mod_divQ <- list(
+  # main effect models
+  m1 = ProbDiv ~ 0 + intercept + stdAgeFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m2 = ProbDiv ~ 0 + intercept + stdAgeMale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m3 = ProbDiv ~ 0 + intercept + stdExpFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m4 = ProbDiv ~ 0 + intercept + stdExpMale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m5 = ProbDiv ~ 0 + intercept + stdPairBond + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m6 = ProbDiv ~ 0 + intercept + stdFledge + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m7 = ProbDiv ~ 0 + intercept + stdQlty + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m8 = ProbDiv ~ 0 + intercept + stdLaying + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m9 = ProbDiv ~ 0 + intercept + stdYear + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m10 = ProbDiv ~ 0 + intercept + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  # additive models
+    # models with fledging probability
+  m11 = ProbDiv ~ 0 + intercept + stdFledge + stdAgeMale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m12 = ProbDiv ~ 0 + intercept + stdFledge + stdAgeFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m13 = ProbDiv ~ 0 + intercept + stdFledge + stdExpMale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m14 = ProbDiv ~ 0 + intercept + stdFledge + stdExpFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m15 = ProbDiv ~ 0 + intercept + stdFledge + stdQlty + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m16 = ProbDiv ~ 0 + intercept + stdFledge + stdPairBond + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m17 = ProbDiv ~ 0 + intercept + stdFledge + stdLaying + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+    # models with fenale age
+  m18 = ProbDiv ~ 0 + intercept + stdAgeMale + stdAgeFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m19 = ProbDiv ~ 0 + intercept + stdQlty + stdAgeFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m20 = ProbDiv ~ 0 + intercept + stdPairBond + stdAgeFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m21 = ProbDiv ~ 0 + intercept + stdLaying + stdAgeFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+    # models with male age
+  m22 = ProbDiv ~ 0 + intercept + stdQlty + stdAgeMale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m23 = ProbDiv ~ 0 + intercept + stdPairBond + stdAgeMale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m24 = ProbDiv ~ 0 + intercept + stdLaying + stdAgeMale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+    # models with fenale breeding experience
+  m25 = ProbDiv ~ 0 + intercept + stdExpMale + stdExpFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m26 = ProbDiv ~ 0 + intercept + stdQlty + stdExpFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m27 = ProbDiv ~ 0 + intercept + stdPairBond + stdExpFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m28 = ProbDiv ~ 0 + intercept + stdLaying + stdExpFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+    # models with male breeding experience
+  m29 = ProbDiv ~ 0 + intercept + stdQlty + stdExpMale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m30 = ProbDiv ~ 0 + intercept + stdPairBond + stdExpMale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m31 = ProbDiv ~ 0 + intercept + stdLaying + stdExpMale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+    # models with paid-bond
+  m32 = ProbDiv ~ 0 + intercept + stdPairBond + stdQlty + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m33 = ProbDiv ~ 0 + intercept + stdPairBond + stdLaying + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+    # models with site quality
+  m34 = ProbDiv ~ 0 + intercept + stdQlty + stdLaying + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  # models with quadratic effects
+  m35 = ProbDiv ~ 0 + intercept + stdAgeMale + stdAgeMaleSq + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m36 = ProbDiv ~ 0 + intercept + stdAgeFemale + stdAgeFemaleSq + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m37 = ProbDiv ~ 0 + intercept + stdExpMale + stdExpMaleSq + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m38 = ProbDiv ~ 0 + intercept + stdExpFemale + stdExpFemaleSq + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m39 = ProbDiv ~ 0 + intercept + stdQlty + stdQltySq + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m40 = ProbDiv ~ 0 + intercept + stdPairBond + stdPairBondSq + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m41 = ProbDiv ~ 0 + intercept + stdLaying + stdLayingSq + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  # models with two-way interactions
+    # models with fledging probability
+  m42 = ProbDiv ~ 0 + intercept + stdFledge * stdAgeMale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m43 = ProbDiv ~ 0 + intercept + stdFledge * stdAgeFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m44 = ProbDiv ~ 0 + intercept + stdFledge * stdExpMale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m45 = ProbDiv ~ 0 + intercept + stdFledge * stdExpFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m46 = ProbDiv ~ 0 + intercept + stdFledge * stdQlty + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m47 = ProbDiv ~ 0 + intercept + stdFledge * stdPairBond + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m48 = ProbDiv ~ 0 + intercept + stdFledge * stdLaying + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+    # models with fenale age
+  m49 = ProbDiv ~ 0 + intercept + stdAgeMale * stdAgeFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m50 = ProbDiv ~ 0 + intercept + stdQlty * stdAgeFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m51 = ProbDiv ~ 0 + intercept + stdPairBond * stdAgeFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m52 = ProbDiv ~ 0 + intercept + stdLaying * stdAgeFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+    # models with male age
+  m53 = ProbDiv ~ 0 + intercept + stdQlty * stdAgeMale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m54 = ProbDiv ~ 0 + intercept + stdPairBond * stdAgeMale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m55 = ProbDiv ~ 0 + intercept + stdLaying * stdAgeMale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+    # models with fenale breeding experience
+  m56 = ProbDiv ~ 0 + intercept + stdExpMale * stdExpFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m57 = ProbDiv ~ 0 + intercept + stdQlty * stdExpFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m58 = ProbDiv ~ 0 + intercept + stdPairBond * stdExpFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m59 = ProbDiv ~ 0 + intercept + stdLaying * stdExpFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+    # models with male age
+  m60 = ProbDiv ~ 0 + intercept + stdQlty * stdExpMale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m61 = ProbDiv ~ 0 + intercept + stdPairBond * stdExpMale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m62 = ProbDiv ~ 0 + intercept + stdLaying * stdExpMale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+    # models with paid-bond
+  m63 = ProbDiv ~ 0 + intercept + stdPairBond * stdQlty + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m64 = ProbDiv ~ 0 + intercept + stdPairBond * stdLaying + (1|Year) + (1|Site) + (1|BandM) + (1|BandF),
+  m65 = ProbDiv ~ 0 + intercept + stdQlty * stdLaying + (1|Year) + (1|Site) + (1|BandM) + (1|BandF)
+  )
+```
+
+DO NOT RUN!! Load the data below
+```{r}
+divQ_data <- tibble( 
+  name = names(mod_divQ),
+  formulas = mod_divQ
+  ) %>% 
+  mutate(model = mod_divQ %>% purrr::map( 
+      .f = brm, 
+      data = TBMU_divorce_cleanQ, 
+      family = bernoulli(),
+      prior = c(set_prior("normal(0,5)", class = "b"), 
+                set_prior("student_t(3,0,5)", class = "sd")),
+      control = list(adapt_delta = 0.99),
+      chains = 4, iter = 10000, warmup = 1000, thin = 5, cores = getOption("mc.cores", 4)))
+```
+
+m2k <- kfold(divQ_data$model$m2,divQ_data$model$m39, compare = TRUE, K = 10, chains = 2, cores = 4,save_fits = TRUE)
 
 ```{r}
-mod_divQ <- list()
+save(divQ_data, file = "brms_divQ.Rdata")
+```
 
-# start with models one main effect to test model comparison
-mod_divQ[[1]] <- brm(ProbDiv ~ 0 + intercept + stdAgeFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF), family = bernoulli(), data =  TBMU_divorce_cleanQ,  prior = c(set_prior("normal(0,5)", class = "b"), set_prior("student_t(3,0,5)", class = "sd")), warmup = 1000, iter = 10000, thin =5, chains = 4, control = list(adapt_delta = 0.99), cores = getOption("mc.cores", 1L))
-mod_divQ[[1]] <-  add_waic(mod_divQ[[1]]) # adds IC info to brms object
-plot(mod_divQ[[1]], pars = "^b_")
+```{r}
+load(file = "brms_divQ.Rdata")
+```
 
-mod_divQ[[2]] <- brm(ProbDiv ~ 0 + intercept + stdAgeMale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF), family = bernoulli(), data =  TBMU_divorce_cleanQ,  prior = c(set_prior("normal(0,5)", class = "b"), set_prior("student_t(3,0,5)", class = "sd")), warmup = 1000, iter = 10000, thin =5, chains = 4, control = list(adapt_delta = 0.99), cores = getOption("mc.cores", 1L))
-mod_divQ[[2]] <-  add_waic(mod_divQ[[2]])
-plot(mod_divQ[[2]], pars = "^b_")
+make sure the brms model selection function have been loaded
+```{r}
+divQ_table <-  waic_table(divQ_data)
+```
 
-mod_divQ[[3]] <- brm(ProbDiv ~ 0 + intercept + stdExpFemale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF), family = bernoulli(), data =  TBMU_divorce_cleanQ,  prior = c(set_prior("normal(0,5)", class = "b"), set_prior("student_t(3,0,5)", class = "sd")), warmup = 1000, iter = 10000, thin =5, chains = 4, control = list(adapt_delta = 0.99), cores = getOption("mc.cores", 1L))
-mod_divQ[[3]] <-  add_waic(mod_divQ[[3]])
-plot(mod_divQ[[3]], pars = "^b_")
+```{r}
+save(divQ_table, file = "brms_divQ_table.Rdata")
+```
 
-mod_divQ[[4]] <- brm(ProbDiv ~ 0 + intercept + stdExpMale + (1|Year) + (1|Site) + (1|BandM) + (1|BandF), family = bernoulli(), data =  TBMU_divorce_cleanQ,  prior = c(set_prior("normal(0,5)", class = "b"), set_prior("student_t(3,0,5)", class = "sd")), warmup = 1000, iter = 10000, thin =5, chains = 4, control = list(adapt_delta = 0.99), cores = getOption("mc.cores", 1L))
-mod_divQ[[4]] <-  add_waic(mod_divQ[[4]])
-plot(mod_divQ[[4]], pars = "^b_")
+```{r}
+load(file = "brms_divQ_table.Rdata")
+```
 
-mod_divQ[[5]] <- brm(ProbDiv ~ 0 + intercept + stdPairBond + (1|Year) + (1|Site) + (1|BandM) + (1|BandF), family = bernoulli(), data =  TBMU_divorce_cleanQ,  prior = c(set_prior("normal(0,5)", class = "b"), set_prior("student_t(3,0,5)", class = "sd")), warmup = 1000, iter = 10000, thin =5, chains = 4, control = list(adapt_delta = 0.99), cores = getOption("mc.cores", 1L))
-mod_divQ[[5]] <-  add_waic(mod_divQ[[5]])
-plot(mod_divQ[[5]], pars = "^b_")
+subsetting models to keep the 95% confidence set and extracting the variables appearing at least once in that subset
+```{r}
+divQ_var <- sub_modvar(divQ_data, divQ_table)
+```
 
-mod_divQ[[6]] <- brm(ProbDiv ~ 0 + intercept + stdFledge + (1|Year) + (1|Site) + (1|BandM) + (1|BandF), family = bernoulli(), data =  TBMU_divorce_cleanQ,  prior = c(set_prior("normal(0,5)", class = "b"), set_prior("student_t(3,0,5)", class = "sd")), warmup = 1000, iter = 10000, thin =5, chains = 4, control = list(adapt_delta = 0.99), cores = getOption("mc.cores", 1L))
-mod_divQ[[6]] <-  add_waic(mod_divQ[[6]])
-plot(mod_divQ[[6]], pars = "^b_")
 
-mod_divQ[[7]] <- brm(ProbDiv ~ 0 + intercept + stdQlty + (1|Year) + (1|Site) + (1|BandM) + (1|BandF), family = bernoulli(), data =  TBMU_divorce_cleanQ,  prior = c(set_prior("normal(0,5)", class = "b"), set_prior("student_t(3,0,5)", class = "sd")), warmup = 1000, iter = 10000, thin =5, chains = 4, control = list(adapt_delta = 0.99), cores = getOption("mc.cores", 1L))
-mod_divQ[[7]] <-  add_waic(mod_divQ[[7]])
-plot(mod_divQ[[7]], pars = "^b_")
+ERROR in modavg function because some interaction models are in the subset but not the main effect models, which means that there are no models to estimate those main effects .. Need to fix code to estimate main effect from interaction model in this case
 
-mod_divQ[[8]] <- brm(ProbDiv ~ 0 + intercept + stdLaying + (1|Year) + (1|Site) + (1|BandM) + (1|BandF), family = bernoulli(), data =  TBMU_divorce_cleanQ,  prior = c(set_prior("normal(0,5)", class = "b"), set_prior("student_t(3,0,5)", class = "sd")), warmup = 1000, iter = 10000, thin =5, chains = 4, control = list(adapt_delta = 0.99), cores = getOption("mc.cores", 1L))
-mod_divQ[[8]] <-  add_waic(mod_divQ[[8]])
-plot(mod_divQ[[8]], pars = "^b_")
+Also, very weird results with the order of the models ... need to check that!!!!
 
-mod_divQ[[9]] <- brm(ProbDiv ~ 0 + intercept + stdYear + (1|Year) + (1|Site) + (1|BandM) + (1|BandF), family = bernoulli(), data =  TBMU_divorce_cleanQ,  prior = c(set_prior("normal(0,5)", class = "b"), set_prior("student_t(3,0,5)", class = "sd")), warmup = 1000, iter = 10000, thin =5, chains = 4, control = list(adapt_delta = 0.99), cores = getOption("mc.cores", 1L))
-mod_divQ[[9]] <-  add_waic(mod_divQ[[9]])
-plot(mod_divQ[[9]], pars = "^b_")
+creating a table with model averaged posterior samples while controlling for interaction vs main effects issues
+```{r}
+divQ_modavg <- brm_mod_avg(divQ_var)
+```
 
-mod_divQ[[10]] <- brm(ProbDiv ~ 0 + intercept + (1|Year) + (1|Site) + (1|BandM) + (1|BandF), family = bernoulli(), data =  TBMU_divorce_cleanQ,  prior = c(set_prior("normal(0,5)", class = "b"), set_prior("student_t(3,0,5)", class = "sd")), warmup = 1000, iter = 10000, thin =5, chains = 4, control = list(adapt_delta = 0.99), cores = getOption("mc.cores", 1L))
-mod_divQ[[10]] <-  add_waic(mod_divQ[[10]])
-plot(mod_divQ[[10]], pars = "^b_")
+```{r}
+write.table(divQ_modavg, "estimates_divQ_TBMU.csv",row.names = TRUE, sep = ",")
 ```
 
 
 
-
-```{r}
-loo_model_weights(mod_AgeF,mod_AgeF2, method = "stacking")
-```
 
 
 ```{r}
@@ -235,8 +344,9 @@ stanplot(mod_brms)
 
 
 
-prior = c(set_prior("normal(0,5)", class = "Intercept"), set_prior("normal(0,5)", class = "b"), set_prior("cauchy(0,2)", class = "sd"), set_prior("lkj(2)", class = "cor")),
 
+
+## Frequentist models (with convergence issues)
 
 ```{r}
 mod_divQ = list()
@@ -380,6 +490,8 @@ write.table(mod_div_EstimatesD6,"estimates_D6_divorce_TBMU.csv", row.names = TRU
 write.table(mod_div_EstimatesP95,"estimates_P95_divorce_TBMU.csv", row.names = TRUE, sep = ",")
 ```
 
+
+## Representations of effects
 
 effect of breeding experience
 ```{r}
@@ -553,6 +665,68 @@ with(age_prepost_comp, hist(AgeDiff, breaks = 20))
 Not great ... will see how the residuals look like...
 
 ```{r}
+mod_AgeDiff <- list(
+
+AgeDiff1 = AgeDiff ~ 0 + intercept + stdSex * stdAge + (1|Year),
+AgeDiff2 = AgeDiff ~ 0 + intercept + stdSex * stdExp + (1|Year),
+AgeDiff3 = AgeDiff ~ 0 + intercept + stdSex + stdAge + (1|Year),
+AgeDiff4 = AgeDiff ~ 0 + intercept + stdSex + stdExp + (1|Year),
+AgeDiff5 = AgeDiff ~ 0 + intercept + stdSex + (1|Year),
+AgeDiff6 = AgeDiff ~ 0 + intercept + stdAge + (1|Year),
+AgeDiff7 = AgeDiff ~ 0 + intercept + stdExp + (1|Year),
+AgeDiff8 = AgeDiff ~ 0 + intercept + (1|Year)
+)
+```
+
+DO NOT RUN !! Load data instead
+```{r}
+#div_AgeDiff <- tibble( 
+#  name = names(mod_AgeDiff),
+#  formulas = mod_AgeDiff
+#  ) %>% 
+#  mutate(model = mod_AgeDiff %>% purrr::map( 
+#      .f = brm, 
+#      data = age_prepost_comp, 
+#      family = gaussian,
+#      prior = c(set_prior("normal(0,5)", class = "b"), 
+#                set_prior("student_t(3,0,5)", class = "sd")),
+#      control = list(adapt_delta = 0.99),
+#      chains = 4, iter = 10000, warmup = 1000, thin = 5, cores = getOption("mc.cores", 1L)))
+```
+
+```{r}
+#save(div_AgeDiff, file = "brms_div_AgeDiff.Rdata")
+```
+
+```{r}
+load(file = "brms_div_AgeDiff.Rdata")
+```
+
+make sure the brms model selection function have been loaded
+```{r}
+divAgeDiff_table <-  waic_table(div_AgeDiff)
+```
+best model is the null model
+
+subsetting models to keep the 95% confidence set and extracting the variables appearing at least once in that subset
+```{r}
+divAgeDiff_var <- sub_modvar(div_AgeDiff, divAgeDiff_table)
+```
+
+creating a table with model averaged posterior samples while controlling for interaction vs main effects issues
+```{r}
+divAgeDiff_modavg <- brm_mod_avg(divAgeDiff_var)
+```
+
+```{r}
+write.table(divAgeDiff_modavg, "estimates_AgeDiff_TBMU.csv",row.names = TRUE, sep = ",")
+```
+
+
+#### glmmTMB analyses
+
+
+```{r}
 mod_AgeDiff = list()
 
 mod_AgeDiff[[1]] = glmmTMB(AgeDiff ~ stdSex * stdAge + (1|Year), family = "gaussian", data = age_prepost_comp)
@@ -582,7 +756,7 @@ mod_AgeDiff_EstimatesD6
 No efffect of any explanatory covariables or of the intercept ...
 
 ```{r}
-write.table(mod_AgeDiff_EstimatesD6, "estimates_D6_AgeDiff_TBMU.csv",row.names = TRUE, sep = ",")
+#write.table(mod_AgeDiff_EstimatesD6, "estimates_D6_AgeDiff_TBMU.csv",row.names = TRUE, sep = ",")
 ```
 
 
@@ -602,6 +776,67 @@ how does the distribution of exp difference look like
 with(exp_prepost_comp, hist(ExpDiff, breaks = 20))
 ```
 Not great ... will see how the residuals look like...
+
+```{r}
+mod_ExpDiff <- list(
+
+ExpDiff1 = ExpDiff ~ 0 + intercept + stdSex * stdAge + (1|Year),
+ExpDiff2 = ExpDiff ~ 0 + intercept + stdSex * stdExp + (1|Year),
+ExpDiff3 = ExpDiff ~ 0 + intercept + stdSex + stdAge + (1|Year),
+ExpDiff4 = ExpDiff ~ 0 + intercept + stdSex + stdExp + (1|Year),
+ExpDiff5 = ExpDiff ~ 0 + intercept + stdSex + (1|Year),
+ExpDiff6 = ExpDiff ~ 0 + intercept + stdAge + (1|Year),
+ExpDiff7 = ExpDiff ~ 0 + intercept + stdExp + (1|Year),
+ExpDiff8 = ExpDiff ~ 0 + intercept + (1|Year)
+)
+```
+
+DO NOT RUN !! Load data instead
+```{r}
+#div_ExpDiff <- tibble( 
+#  name = names(mod_ExpDiff),
+#  formulas = mod_ExpDiff
+#  ) %>% 
+#  mutate(model = mod_ExpDiff %>% purrr::map( 
+#      .f = brm, 
+#      data = exp_prepost_comp, 
+#      family = gaussian,
+#      prior = c(set_prior("normal(0,5)", class = "b"), 
+#                set_prior("student_t(3,0,5)", class = "sd")),
+#      control = list(adapt_delta = 0.99),
+#      chains = 4, iter = 10000, warmup = 1000, thin = 5, cores = getOption("mc.cores", 1L)))
+```
+
+```{r}
+#save(div_ExpDiff, file = "brms_div_ExpDiff.Rdata")
+```
+
+```{r}
+load(file = "brms_div_ExpDiff.Rdata")
+```
+
+make sure the brms model selection function have been loaded
+```{r}
+divExpDiff_table <-  waic_table(div_ExpDiff)
+```
+best model is the null model
+
+subsetting models to keep the 95% confidence set and extracting the variables appearing at least once in that subset
+```{r}
+divExpDiff_var <- sub_modvar(div_ExpDiff, divExpDiff_table)
+```
+
+creating a table with model averaged posterior samples while controlling for interaction vs main effects issues
+```{r}
+divExpDiff_modavg <- brm_mod_avg(divExpDiff_var)
+```
+
+```{r}
+write.table(divExpDiff_modavg, "estimates_ExpDiff_TBMU.csv",row.names = TRUE, sep = ",")
+```
+
+
+#### glmmTMB analyses
 
 ```{r}
 mod_ExpDiff = list()
@@ -634,7 +869,7 @@ mod_ExpDiff_EstimatesD6
 No efffect of any explanatory covariables. The intercept isn't really different from zero ...
 
 ```{r}
-write.table(mod_ExpDiff_EstimatesD6, "estimates_D6_ExpDiff_TBMU.csv",row.names = TRUE, sep = ",")
+#write.table(mod_ExpDiff_EstimatesD6, "estimates_D6_ExpDiff_TBMU.csv",row.names = TRUE, sep = ",")
 ```
 
 
@@ -654,6 +889,157 @@ did one sex move more after divorce?
 with(qlty_prepost_comp, table(Moved, Sex))
 ```
 NO! Both sexes were equally likely to remain on site
+
+
+```{r}
+mod_MovedDiv <- list(
+
+MovedDiv1 = binMoved ~ 0 + intercept + stdSex * stdAge + (1|Year),
+MovedDiv2 = binMoved ~ 0 + intercept + stdExp * stdSex + (1|Year),
+MovedDiv3 = binMoved ~ 0 + intercept + stdSex + stdAge + (1|Year),
+MovedDiv4 = binMoved ~ 0 + intercept + stdSex + stdExp + (1|Year),
+MovedDiv5 = binMoved ~ 0 + intercept + stdSex + (1|Year),
+MovedDiv6 = binMoved ~ 0 + intercept + stdAge + (1|Year),
+MovedDiv7 = binMoved ~ 0 + intercept + stdExp + (1|Year),
+MovedDiv8 = binMoved ~ 0 + intercept + (1|Year)
+)
+```
+
+DO NOT RUN !! Load data instead
+```{r}
+#div_MovedDiv <- tibble( 
+#  name = names(mod_MovedDiv),
+#  formulas = mod_MovedDiv
+#  ) %>% 
+#  mutate(model = mod_MovedDiv %>% purrr::map( 
+#      .f = brm, 
+#      data = qlty_prepost_comp, 
+#      family = bernoulli(),
+#      prior = c(set_prior("normal(0,5)", class = "b"), 
+#                set_prior("student_t(3,0,5)", class = "sd")),
+#      control = list(adapt_delta = 0.99),
+#      chains = 4, iter = 10000, warmup = 1000, thin = 5, cores = getOption("mc.cores", 1L)))
+```
+
+```{r}
+#save(div_MovedDiv, file = "brms_div_MovedDiv.Rdata")
+```
+
+```{r}
+load(file = "brms_div_MovedDiv.Rdata")
+```
+
+make sure the brms model selection function have been loaded
+```{r}
+divMovedDiv_table <-  waic_table(div_MovedDiv)
+```
+best model is null model but experience and sex*experience very close
+
+subsetting models to keep the 95% confidence set and extracting the variables appearing at least once in that subset
+```{r}
+divMovedDiv_var <- sub_modvar(div_MovedDiv, divMovedDiv_table)
+```
+
+creating a table with model averaged posterior samples while controlling for interaction vs main effects issues
+```{r}
+divMovedDiv_modavg <- brm_mod_avg(divMovedDiv_var)
+```
+there is an interaction between sex and breeding experience
+
+```{r}
+write.table(divMovedDiv_modavg, "estimates_MovedDiv_TBMU.csv",row.names = TRUE, sep = ",")
+```
+
+```{r}
+SexExp_dat <- expand.grid(stdSex = unique(qlty_prepost_comp$stdSex), stdExp = unique(qlty_prepost_comp$stdExp), Year = unique(qlty_prepost_comp$Year))
+
+SexExp_pred <- bind_cols(SexExp_dat, data.frame(predict(div_MovedDiv$model$MovedDiv2, newdata = SexExp_dat))) %>% group_by(stdSex, stdExp) %>% summarise(Est = mean(Estimate), SE = mean(Est.Error))
+``` 
+
+
+```{r}
+aggr_moved = qlty_prepost_comp %>% group_by(stdSex, stdExp) %>% summarise(Mean = mean(binMoved), SE = sd(binMoved)/sqrt(n()), N = n())
+
+ggplot(data = aggr_moved, aes(x = stdExp, y = Mean, colour = factor(stdSex))) + geom_point(aes(size=N)) + geom_line(data = SexExp_pred, aes(x = stdExp, y = Est, colour = factor(stdSex)))
+```
+Probability of moving increases with experience for females, but remains stable for males
+
+
+
+Now focusing only on birds that moved
+```{r}
+movedY_qlty_prepost_comp = qlty_prepost_comp %>% filter(Moved == "YES")
+```
+
+how does the distribution of qlty difference look like
+```{r}
+with(movedY_qlty_prepost_comp, hist(QltyDiff, breaks = 20))
+```
+Not bad...
+
+```{r}
+mod_QltyDiff <- list(
+
+QltyDiff1 = QltyDiff ~ 0 + intercept + stdSex * stdAge + (1|Year),
+QltyDiff2 = QltyDiff ~ 0 + intercept + stdExp * stdSex + (1|Year),
+QltyDiff3 = QltyDiff ~ 0 + intercept + stdSex + stdAge + (1|Year),
+QltyDiff4 = QltyDiff ~ 0 + intercept + stdSex + stdExp + (1|Year),
+QltyDiff5 = QltyDiff ~ 0 + intercept + stdSex + (1|Year),
+QltyDiff6 = QltyDiff ~ 0 + intercept + stdAge + (1|Year),
+QltyDiff7 = QltyDiff ~ 0 + intercept + stdExp + (1|Year),
+QltyDiff8 = QltyDiff ~ 0 + intercept + (1|Year)
+)
+```
+
+
+DO NOT RUN !! Load data instead
+```{r}
+div_QltyDiff <- tibble( 
+  name = names(mod_QltyDiff),
+  formulas = mod_QltyDiff
+  ) %>% 
+  mutate(model = mod_QltyDiff %>% purrr::map( 
+      .f = brm, 
+      data = movedY_qlty_prepost_comp, 
+      family = gaussian,
+      prior = c(set_prior("normal(0,5)", class = "b"), 
+                set_prior("student_t(3,0,5)", class = "sd")),
+      control = list(adapt_delta = 0.99),
+      chains = 4, iter = 10000, warmup = 1000, thin = 5, cores = getOption("mc.cores", 1L)))
+```
+
+```{r}
+save(div_QltyDiff, file = "brms_div_QltdyDiff.Rdata")
+```
+
+```{r}
+load(file = "brms_div_QltdyDiff.Rdata")
+```
+
+make sure the brms model selection function have been loaded
+```{r}
+divQltyDiff_table <-  waic_table(div_QltyDiff)
+```
+best model with breeding experience
+
+subsetting models to keep the 95% confidence set and extracting the variables appearing at least once in that subset
+```{r}
+divQltyDiff_var <- sub_modvar(div_QltyDiff, divQltyDiff_table)
+```
+
+creating a table with model averaged posterior samples while controlling for interaction vs main effects issues
+```{r}
+divQltyDiff_modavg <- brm_mod_avg(divQltyDiff_var)
+```
+weak positive effect of breeding experience: more experienced birds tend to move to a higher quality site after divorce
+
+```{r}
+write.table(divQltyDiff_modavg, "estimates_QltyDiff_TBMU.csv",row.names = TRUE, sep = ",")
+```
+
+
+
+#### glmmTMB analyses
 
 ```{r}
 mod_MovedDiv = list()
